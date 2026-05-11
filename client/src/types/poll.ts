@@ -23,7 +23,7 @@ export type Poll = {
   tags: string[];
   accentColor: string;
   completionMessage: string;
-  status: "draft" | "active" | "expired" | "published";
+  status: "draft" | "active" | "closed" | "expired" | "published";
   isAnonymous: boolean;
   showLiveResults: boolean;
   expiresAt: string | null;

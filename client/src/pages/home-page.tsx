@@ -1,12 +1,11 @@
 import { SignUpButton } from "@clerk/react";
 import { Activity, Eye, Loader2, Plus, Rocket, Send, ShieldCheck, Sparkles, Vote, Zap } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { SignedInView, SignedOutView } from "../components/auth/auth-views";
 import { AuthWall } from "../components/home/auth-wall";
 import { EmptyState } from "../components/home/empty-state";
 import { PollCard } from "../components/polls/poll-card";
-import { Metric } from "../components/ui/metric";
 import { getApiError, useApiClient } from "../lib/api";
 import { usePollStore } from "../store/poll-store";
 import type { PollSummary } from "../types/poll";
@@ -33,6 +32,8 @@ export function HomePage() {
   const api = useApiClient();
   const navigate = useNavigate();
   const { polls, setPolls, loading, setLoading } = usePollStore();
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   useEffect(() => {
     let active = true;
@@ -59,6 +60,19 @@ export function HomePage() {
   }, []);
 
   const totalResponses = polls.reduce((sum, poll) => sum + poll.analytics.totalResponses, 0);
+  const visiblePolls = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return polls.filter((poll) => {
+      const matchesSearch =
+        !query ||
+        poll.title.toLowerCase().includes(query) ||
+        (poll.description ?? "").toLowerCase().includes(query) ||
+        poll.category.toLowerCase().includes(query) ||
+        poll.tags.some((tag) => tag.toLowerCase().includes(query));
+      const matchesStatus = statusFilter === "all" || poll.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [polls, search, statusFilter]);
 
   const scrollToWorkspace = () =>
     document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth" });
@@ -187,6 +201,30 @@ export function HomePage() {
             </SignedInView>
           </div>
 
+          <SignedInView>
+            <div className="mt-6 grid gap-3 md:grid-cols-[1fr_220px]">
+              <input
+                className="neo-input"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search polls by title, description, category, or tag"
+                type="search"
+                value={search}
+              />
+              <select
+                className="neo-input"
+                onChange={(event) => setStatusFilter(event.target.value)}
+                value={statusFilter}
+              >
+                <option value="all">All statuses</option>
+                <option value="draft">Draft</option>
+                <option value="active">Active</option>
+                <option value="closed">Closed</option>
+                <option value="expired">Expired</option>
+                <option value="published">Published</option>
+              </select>
+            </div>
+          </SignedInView>
+
           <SignedOutView>
             <AuthWall />
           </SignedOutView>
@@ -198,9 +236,13 @@ export function HomePage() {
               </div>
             ) : polls.length === 0 ? (
               <EmptyState />
+            ) : visiblePolls.length === 0 ? (
+              <div className="hp-panel">
+                <p className="font-black">No polls match your filters.</p>
+              </div>
             ) : (
               <div className="hp-poll-grid">
-                {polls.map((poll) => (
+                {visiblePolls.map((poll) => (
                   <PollCard key={poll.id} poll={poll} />
                 ))}
               </div>

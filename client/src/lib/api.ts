@@ -30,6 +30,14 @@ export function useApiClient() {
         });
         return response.data;
       },
+      async download(path: string) {
+        const token = await getToken();
+        const response = await api.get<Blob>(path, {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          responseType: "blob",
+        });
+        return response.data;
+      },
     }),
     [getToken],
   );

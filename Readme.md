@@ -339,6 +339,7 @@ Poll statuses:
 
 - `draft` - Planned status for editable unpublished work.
 - `active` - Accepting responses.
+- `closed` - Manually closed by the creator and not accepting responses.
 - `expired` - No longer accepting responses.
 - `published` - Final results are visible.
 
@@ -347,7 +348,7 @@ Question types:
 - `single_choice`
 - `image_choice`
 
-Current implementation note: newly created polls are inserted as `active`, so they can be shared immediately after creation.
+Current implementation note: newly created polls are inserted as `active`, so they can be shared immediately after creation. Duplicated polls are inserted as `draft` so they can be adjusted before reuse.
 
 ## Data Flow
 
@@ -467,12 +468,130 @@ Before production deployment:
 - Run the backend with process supervision.
 - Add Dockerfiles for the client and server if the deployment target expects fully containerized app services.
 
-## Future Improvements
+## Feature Roadmap
 
-- Add edit support for draft polls.
-- Add explicit expire job or status transition for expired polls.
-- Add image upload/storage for `image_choice` options.
-- Add pagination and search for large poll lists.
-- Add more analytics dimensions.
-- Add automated tests for poll creation, response submission, auth behavior, and analytics.
-- Add production Dockerfiles for the client and server.
+This is the planned product backlog for growing the app from a working polling system into a more complete polling platform.
+
+### Phase 1: Core Poll Management
+
+- Draft poll editing before a poll goes live.
+- Manual close poll action from the creator dashboard.
+- Scheduled start and end time.
+- Explicit poll lifecycle controls: `draft`, `active`, `closed`, `expired`, and `published`.
+- Poll preview mode before creation.
+- Duplicate existing poll as a reusable template.
+- Archive old polls.
+- Soft delete polls so accidental deletes can be recovered.
+- Search, filter, and sort polls by title, category, tag, status, and date.
+
+### Phase 2: More Question Types
+
+- Multiple choice with more than one selectable answer.
+- Free-text answer.
+- Rating scale.
+- Ranking question.
+- Yes/no question.
+- Image choice question.
+- Optional and required question support per question.
+- Randomized question order.
+- Randomized option order.
+- Conditional questions based on previous answers.
+- Branching poll flow for different respondent paths.
+
+### Phase 3: Better Respondent Experience
+
+- Dedicated thank-you page after submission.
+- Let respondents edit their response before the poll closes.
+- Progress indicator for long polls.
+- One-question-at-a-time response mode.
+- Stronger mobile-first public poll layout.
+- Anonymous display name support.
+- Confirmation email for non-anonymous submissions.
+- Better handling for expired, closed, private, and already-submitted states.
+
+### Phase 4: Sharing And Distribution
+
+- QR code generation for public poll links.
+- Embed code for adding a poll to external websites.
+- Share buttons for common channels.
+- Password-protected polls.
+- Invite-only polls.
+- Maximum response limit per poll.
+- Custom poll slug support.
+- Branded public poll pages with creator/team identity.
+
+### Phase 5: Results And Analytics
+
+- CSV export.
+- JSON export.
+- PDF report export.
+- Live response feed.
+- Response timeline chart.
+- Question-by-question analytics improvements.
+- Completion rate by question.
+- Filter analytics by date range.
+- Segment analytics by authenticated vs anonymous responses.
+- Public results modes:
+  - hidden
+  - visible after submit
+  - live while active
+  - visible only after publish
+- More visual chart types for results.
+
+### Phase 6: Realtime Features
+
+- Live dashboard charts through Socket.IO.
+- Dashboard notification when a new response arrives.
+- Show active viewers/respondents on the creator dashboard.
+- Notify the dashboard when someone starts answering.
+- Live result animations when new responses arrive.
+- Socket reconnect handling.
+- Fallback polling if the socket connection drops.
+
+### Phase 7: Teams And Permissions
+
+- Team workspaces.
+- Clerk organization support.
+- Invite collaborators to manage polls.
+- Role-based access:
+  - owner
+  - editor
+  - viewer
+- Private polls that require sign-in.
+- Workspace-level poll templates.
+- Workspace-level analytics.
+
+### Phase 8: Security, Abuse Prevention, And Reliability
+
+- Rate limiting on response submission.
+- Stronger anonymous duplicate protection with submission token, IP hash, and user-agent checks.
+- Spam protection.
+- Input sanitization and validation hardening.
+- Audit logs for poll creation, edits, closing, publishing, and deletion.
+- Centralized error logging.
+- Safer CORS configuration for production.
+- Production-ready environment validation.
+
+### Phase 9: Testing And DevOps
+
+- Automated tests for poll creation.
+- Automated tests for response submission.
+- Automated tests for analytics calculations.
+- Automated tests for auth-required poll behavior.
+- Automated tests for duplicate response behavior.
+- Client component tests for builder, dashboard, and public poll form.
+- Production Dockerfile for the server.
+- Production Dockerfile for the client.
+- Full Docker Compose setup for local client, server, and database.
+- CI pipeline for lint, typecheck, build, and tests.
+
+### Recommended Build Order
+
+1. Draft editing and manual close poll.
+2. CSV export and QR code sharing.
+3. More question types.
+4. Better public result visibility controls.
+5. Response editing and progress UI.
+6. Team workspaces and collaborator roles.
+7. Rate limiting, spam protection, and audit logs.
+8. Production Dockerfiles and CI.

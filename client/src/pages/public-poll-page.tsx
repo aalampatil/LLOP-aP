@@ -56,6 +56,11 @@ export function PublicPollPage() {
             <div className="pp-warn-label">◎ Poll expired</div>
             This poll has expired. Results will appear here after the creator publishes them.
           </div>
+        ) : !poll.publicState.acceptingResponses ? (
+          <div className="pp-warn">
+            <div className="pp-warn-label">◎ Poll closed</div>
+            This poll is not accepting responses. Results will appear here after the creator publishes them.
+          </div>
         ) : poll.blockedByAuth ? (
           <div style={{ animation: "pp-fadeUp .5s ease both .1s" }}>
             <AuthRequiredPanel />

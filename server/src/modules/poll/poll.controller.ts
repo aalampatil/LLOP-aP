@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { getAuth } from "@clerk/express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
 import {
@@ -26,6 +26,16 @@ function stringParam(value: string | string[] | undefined, name: string) {
   if (Array.isArray(value)) return value[0] ?? "";
   if (value) return value;
   throw new HttpError(400, `${name} is required`);
+}
+
+function csvCell(value: unknown) {
+  const text =
+    value instanceof Date
+      ? value.toISOString()
+      : value === null || value === undefined
+        ? ""
+        : String(value);
+  return `"${text.replaceAll('"', '""')}"`;
 }
 
 const questionInput = z.object({
@@ -184,6 +194,195 @@ export async function publishPoll(req: Request, res: Response) {
   });
 
   return res.json({ poll: serializePoll(updated, loaded.questions), analytics });
+}
+
+export async function closePoll(req: Request, res: Response) {
+  const user = await requireSessionUser(req);
+  const pollId = stringParam(req.params.id, "Poll id");
+
+  const loaded = await loadPollForOwner(pollId, user.id);
+  if (!loaded) throw new HttpError(404, "Poll not found");
+  if (loaded.poll.status === "published") {
+    throw new HttpError(409, "Published polls cannot be closed");
+  }
+
+  const [updated] = await db
+    .update(pollsTable)
+    .set({
+      status: "closed",
+      updatedAt: new Date(),
+    })
+    .where(and(eq(pollsTable.id, pollId), eq(pollsTable.createdBy, user.id)))
+    .returning();
+
+  if (!updated) throw new HttpError(404, "Poll not found");
+
+  const analytics = await buildAnalytics(updated.id);
+  getIO().to(`poll:${updated.id}`).emit("poll:closed", {
+    pollId: updated.id,
+    analytics,
+  });
+
+  return res.json({ poll: serializePoll(updated, loaded.questions), analytics });
+}
+
+export async function reopenPoll(req: Request, res: Response) {
+  const user = await requireSessionUser(req);
+  const pollId = stringParam(req.params.id, "Poll id");
+
+  const loaded = await loadPollForOwner(pollId, user.id);
+  if (!loaded) throw new HttpError(404, "Poll not found");
+  if (loaded.poll.status === "published") {
+    throw new HttpError(409, "Published polls cannot be reopened");
+  }
+  if (loaded.poll.expiresAt && loaded.poll.expiresAt.getTime() <= Date.now()) {
+    throw new HttpError(409, "Expired polls cannot be reopened");
+  }
+
+  const [updated] = await db
+    .update(pollsTable)
+    .set({
+      status: "active",
+      updatedAt: new Date(),
+    })
+    .where(and(eq(pollsTable.id, pollId), eq(pollsTable.createdBy, user.id)))
+    .returning();
+
+  if (!updated) throw new HttpError(404, "Poll not found");
+
+  const analytics = await buildAnalytics(updated.id);
+  getIO().to(`poll:${updated.id}`).emit("poll:reopened", {
+    pollId: updated.id,
+    analytics,
+  });
+
+  return res.json({ poll: serializePoll(updated, loaded.questions), analytics });
+}
+
+export async function duplicatePoll(req: Request, res: Response) {
+  const user = await requireSessionUser(req);
+  const pollId = stringParam(req.params.id, "Poll id");
+
+  const loaded = await loadPollForOwner(pollId, user.id);
+  if (!loaded) throw new HttpError(404, "Poll not found");
+
+  const title = `${loaded.poll.title} Copy`;
+  const slug = await makeUniqueSlug(title);
+  const duplicated = await db.transaction(async (tx) => {
+    const [createdPoll] = await tx
+      .insert(pollsTable)
+      .values({
+        createdBy: user.id,
+        slug,
+        title,
+        description: loaded.poll.description,
+        category: loaded.poll.category,
+        tags: loaded.poll.tags,
+        accentColor: loaded.poll.accentColor,
+        completionMessage: loaded.poll.completionMessage,
+        status: "draft",
+        isAnonymous: loaded.poll.isAnonymous,
+        showLiveResults: loaded.poll.showLiveResults,
+        expiresAt: null,
+      })
+      .returning();
+
+    if (!createdPoll) throw new HttpError(500, "Poll could not be duplicated");
+
+    await tx.insert(questionsTable).values(
+      loaded.questions.map((question, index) => ({
+        pollId: createdPoll.id,
+        question: question.question,
+        questionType: question.questionType,
+        options: question.options,
+        isMandatory: question.isMandatory,
+        displayOrder: index,
+      })),
+    );
+
+    return createdPoll;
+  });
+
+  const duplicatedLoaded = await loadPollForOwner(duplicated.id, user.id);
+  if (!duplicatedLoaded) throw new HttpError(500, "Duplicated poll could not be loaded");
+
+  return res.status(201).json({
+    poll: serializePoll(duplicatedLoaded.poll, duplicatedLoaded.questions),
+    analytics: await buildAnalytics(duplicatedLoaded.poll.id),
+  });
+}
+
+export async function exportResponses(req: Request, res: Response) {
+  const user = await requireSessionUser(req);
+  const pollId = stringParam(req.params.id, "Poll id");
+
+  const loaded = await loadPollForOwner(pollId, user.id);
+  if (!loaded) throw new HttpError(404, "Poll not found");
+
+  const responses = await db
+    .select()
+    .from(responsesTable)
+    .where(eq(responsesTable.pollId, pollId))
+    .orderBy(asc(responsesTable.submittedAt));
+
+  const responseIds = responses.map((response) => response.id);
+  const answers =
+    responseIds.length > 0
+      ? await db
+          .select()
+          .from(questionResponsesTable)
+          .where(inArray(questionResponsesTable.responseId, responseIds))
+      : [];
+
+  const optionLabelsByQuestion = new Map<string, Map<string, string>>();
+  for (const question of loaded.questions) {
+    const options = parseJson<{ id: string; label: string }[]>(question.options, []);
+    optionLabelsByQuestion.set(
+      question.id,
+      new Map(options.map((option) => [option.id, option.label])),
+    );
+  }
+
+  const answersByResponse = new Map<string, Map<string, string>>();
+  for (const answer of answers) {
+    const labels = optionLabelsByQuestion.get(answer.questionId);
+    const answerText = labels?.get(answer.selectedOptionId ?? "") ?? answer.selectedOptionId ?? "";
+    const row = answersByResponse.get(answer.responseId) ?? new Map<string, string>();
+    row.set(answer.questionId, answerText);
+    answersByResponse.set(answer.responseId, row);
+  }
+
+  const header = [
+    "response_id",
+    "submitted_at",
+    "respondent_name",
+    "respondent_email",
+    "authenticated_user_id",
+    ...loaded.questions.map((question) => question.question),
+  ];
+
+  const rows = responses.map((response) => {
+    const responseAnswers = answersByResponse.get(response.id) ?? new Map<string, string>();
+    return [
+      response.id,
+      response.submittedAt,
+      response.respondentName,
+      response.respondentEmail,
+      response.userId,
+      ...loaded.questions.map((question) => responseAnswers.get(question.id) ?? ""),
+    ];
+  });
+
+  const csv = [header, ...rows]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\n");
+
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${loaded.poll.slug}-responses.csv"`,
+  );
+  return res.send(csv);
 }
 
 export async function getPublicPoll(req: Request, res: Response) {

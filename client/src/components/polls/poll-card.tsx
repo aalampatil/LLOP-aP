@@ -1,14 +1,30 @@
-import { BarChart3, Check, Radio, Send, Share2 } from "lucide-react";
+import { BarChart3, Check, CopyPlus, Loader2, Radio, Send, Share2 } from "lucide-react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { getApiError, useApiClient } from "../../lib/api";
 import { publicPollUrl } from "../../lib/poll-utils";
-import type { PollSummary } from "../../types/poll";
+import type { Poll, PollSummary } from "../../types/poll";
 import { Badge } from "../ui/badge";
 import { CopyPublicLinkButton } from "../ui/copy-public-link-button";
 import { Metric } from "../ui/metric";
 
 export function PollCard({ poll }: { poll: PollSummary }) {
   const navigate = useNavigate();
+  const api = useApiClient();
+  const [duplicating, setDuplicating] = useState(false);
   const shareUrl = publicPollUrl(poll.slug);
+
+  const duplicate = async () => {
+    setDuplicating(true);
+    try {
+      const data = await api.post<{ poll: Poll }>(`/api/poll/${poll.id}/duplicate`);
+      navigate(`/dashboard/${data.poll.id}`);
+    } catch (error) {
+      window.alert(getApiError(error, "Could not duplicate poll"));
+    } finally {
+      setDuplicating(false);
+    }
+  };
 
   return (
     <article className="neo-panel group p-5 transition duration-200 hover:-translate-y-1">
@@ -59,6 +75,15 @@ export function PollCard({ poll }: { poll: PollSummary }) {
           <Share2 className="size-4" /> Public link
         </button>
         <CopyPublicLinkButton url={shareUrl} />
+        <button
+          className="neo-button bg-main"
+          disabled={duplicating}
+          onClick={duplicate}
+          type="button"
+        >
+          {duplicating ? <Loader2 className="size-4 animate-spin" /> : <CopyPlus className="size-4" />}
+          Duplicate
+        </button>
       </div>
     </article>
   );

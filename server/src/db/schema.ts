@@ -16,6 +16,7 @@ import {
 export const pollStatusEnum = pgEnum("poll_status", [
   "draft",
   "active",
+  "closed",
   "expired",
   "published",
 ]);
