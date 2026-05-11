@@ -49,7 +49,7 @@ export function Header() {
           </button>
           <SignedOutView>
             <SignInButton mode="modal">
-              <button className="neo-button bg-white" type="button">
+              <button className="neo-button bg-white text-black" type="button">
                 Sign in
               </button>
             </SignInButton>
