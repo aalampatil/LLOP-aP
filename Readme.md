@@ -1,268 +1,478 @@
-## Real time Polling app
+# LLOP Polling App
 
-User submits answer
-│
-▼
-INSERT into question_responses ← source of truth
-│
-▼
-Compute points (correctness + speed bonus)
-│
-▼
-UPDATE session_participants ← totalPoints += earned
-SET totalPoints = totalPoints + X
-│
-▼
-Recalculate ranks for session ← optional, can do client-side
-│
-▼
-Publish leaderboard event ← WebSocket broadcast
-to all session subscribers
+LLOP is a full-stack real-time polling application. Creators sign in, build polls, share public links, collect responses, watch analytics update live, and publish final results when the poll is ready.
 
-![alt text](image.png)
-ERD
+The project is split into two apps:
 
-```TS
-users [icon: user, color: blue] {
-  id uuid pk
-  clerk_user_id varchar
-  name varchar
-  email varchar
-  created_at timestamp
-  updated_at timestamp
-}
+- `client/` - React + Vite frontend
+- `server/` - Bun + Express API, Socket.IO server, Drizzle ORM, PostgreSQL
 
-polls [icon: list, color: purple] {
-  id uuid pk
-  created_by uuid fk
-  title varchar
-  description text
-  status poll_status
-  is_anonymous boolean
-  expires_at timestamp
-  published_at timestamp
-  created_at timestamp
-  updated_at timestamp
-}
+The current backend source of truth is PostgreSQL. REST handles creation, fetching, publishing, and response submission. Socket.IO is used only where it adds value: live creator analytics updates after responses are saved.
 
-questions [icon: help-circle, color: teal] {
-  id uuid pk
-  poll_id uuid fk
-  question text
-  question_type enum
-  options text
-  is_mandatory boolean
-  display_order int
-  created_at timestamp
-}
+![Polling app planning diagram](image.png)
 
-responses [icon: message-square, color: green] {
-  id uuid pk
-  poll_id uuid fk
-  user_id uuid fk nullable
-  submission_token varchar nullable
-  submitted_at timestamp
-  created_at timestamp
-}
+## What We Are Building
 
-question_responses [icon: check-square, color: orange] {
-  id uuid pk
-  response_id uuid fk
-  question_id uuid fk
-  selected_option_id varchar nullable
-  answered_at timestamp
-}
+The goal is to build a production-shaped polling workflow with clean creator and respondent paths.
 
-// one user creates many polls (user must exist)
-users.id < polls.created_by
+Creator flow:
 
-// one user submits many responses (nullable — anonymous allowed)
-users.id <? responses.user_id
+1. Creator signs in with Clerk.
+2. Creator builds a poll with title, description, category, tags, expiration, anonymity mode, public result settings, and one or more questions.
+3. Server creates the poll, generates a unique public slug, stores questions and options, and marks the poll as active.
+4. Creator shares `/p/:slug`.
+5. Creator opens `/dashboard/:pollId` to watch analytics.
+6. Dashboard joins a Socket.IO room for that poll.
+7. When responses arrive, the server recalculates analytics and broadcasts the update.
+8. Creator publishes final results when ready.
 
-// one poll has many questions (poll must exist)
-polls.id < questions.poll_id
+Respondent flow:
 
-// one poll receives many responses (poll must exist)
-polls.id < responses.poll_id
+1. Respondent opens `/p/:slug`.
+2. Client loads the public poll by slug.
+3. Respondent submits answers through REST.
+4. Server validates required questions, valid options, duplicate submissions, auth rules, and poll status.
+5. Server stores the response and question responses.
+6. Server emits updated analytics to the creator dashboard.
+7. Respondent sees the completion message and, if enabled, live results.
 
-// one response contains one or more question_responses (must have at least one)
-responses.id < question_responses.response_id
+Important design decision:
 
-// one question answered across many question_responses (zero or many)
-questions.id < question_responses.question_id
+- Respondents do not need sockets.
+- The public poll form submits through REST.
+- The creator dashboard uses sockets for live analytics.
+- This keeps the response path simple and avoids unnecessary open socket connections.
+
+## Current Planning
+
+The app is planned around these responsibilities:
+
+- Authentication: Clerk owns user identity and session tokens.
+- Local user records: The server maps Clerk users into the `users` table for relational ownership.
+- Poll management: Creators own polls and can list, create, inspect analytics, and publish results.
+- Public poll access: Respondents access polls through slugs instead of internal UUIDs.
+- Response collection: Responses are stored as a response row plus one row per answered question.
+- Duplicate protection: Authenticated polls restrict one response per user per poll; anonymous polls use a client-side submission token.
+- Analytics: Server computes analytics from stored responses and question responses.
+- Real-time updates: Server broadcasts analytics updates to `poll:${pollId}` rooms after a response is saved.
+- Database migrations: Drizzle migrations live in `server/drizzle/`.
+- Local database: Docker Compose starts PostgreSQL for development.
+
+## Tech Stack
+
+Frontend:
+
+- React 19
+- Vite
+- TypeScript
+- React Router
+- Clerk React SDK
+- Axios
+- Zustand
+- Tailwind CSS 4
+- Radix UI and shadcn-style primitives
+- Lucide React icons
+- Socket.IO client usage through local hooks
+
+Backend:
+
+- Bun runtime
+- Express 5
+- TypeScript
+- Socket.IO
+- Clerk Express middleware
+- Drizzle ORM
+- PostgreSQL
+- Zod validation
+- Docker Compose for local Postgres
+
+## Project Structure
+
+```txt
+.
+|-- client/
+|   |-- src/
+|   |   |-- components/
+|   |   |-- hooks/
+|   |   |-- lib/
+|   |   |-- pages/
+|   |   |-- store/
+|   |   |-- types/
+|   |   |-- App.tsx
+|   |   `-- main.tsx
+|   |-- .env.example
+|   |-- package.json
+|   `-- vite.config.ts
+|-- server/
+|   |-- drizzle/
+|   |-- src/
+|   |   |-- db/
+|   |   |-- lib/
+|   |   |-- modules/
+|   |   |-- socket/
+|   |   |-- env.ts
+|   |   `-- index.ts
+|   |-- .env.example
+|   |-- docker-compose.yml
+|   |-- drizzle.config.js
+|   `-- package.json
+|-- image.png
+`-- Readme.md
 ```
 
-User creates poll
-│
-▼
-status = "draft"
-│
-│ Add questions + options freely
-│ Edit / delete / reorder
-│
-▼
-status = "active" ←── creator hits "Go Live"
-│ shareable link is now valid
-│
-│ Respondents submit answers
-│
-├──── expiresAt passes ──────────► status = "expired"
-│ │
-│ │ no more submissions
-│ ▼
-│ creator reviews analytics
-│ │
-└───────────────────────────────────────▼
-status = "published"
-public can see results
-via same poll link
+## Environment Variables
 
----
+Create environment files from the examples before running the apps.
 
-```JS
-Who Joins the Poll Room and When
-Creator opens analytics dashboard
-        │
-        ▼
-socket.emit("poll:join", { pollId })   ← watches live stats
+### Client Env Example
 
-Respondent opens public poll link
-        │
-        ▼
-socket.emit("poll:join", { pollId })   ← same room, different reason
-Both join the same poll:${pollId} room. But only the creator cares about the poll:stats:updated event — the respondent is there just to submit answers via REST.
+Path: `client/.env`
 
-So Do You Even Need Respondent in the Room?
-No. Think about it:
-
-Respondent opens poll link → fills the form → hits submit → POST /api/polls/:id/respond
-That's pure REST. No socket needed from the respondent's side at all.
-The socket emit after insert goes to the creator's dashboard, not back to the respondent.
-
-Respondent                Creator Dashboard
-    │                           │
-    │  POST /respond (REST)     │  socket.emit("poll:join")
-    │ ─────────────────────►    │  ← already listening
-    │                           │
-    │                    DB insert happens
-    │                           │
-    │                    io.to(`poll:${pollId}`)
-    │                    .emit("poll:stats:updated")
-    │                           │
-    │                           ▼
-    │                    stats update on screen
-
-Verdict
-WhoNeeds to join socket room?WhyCreator on dashboard✅ YesReceives live stats updatesRespondent on poll form❌ NoOnly does REST submit, needs no live data
-So only emit poll:join on the creator's analytics dashboard page, not on the public poll form page. Keep the respondent flow pure REST — simpler and cleaner.
+```env
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_publishable_key
+VITE_API_URL=http://localhost:3000
 ```
 
----
+Client variables:
 
-```JS
-Two Different Pages
-/poll/:id              ← public page, respondent fills and submits
-/dashboard/poll/:id    ← creator's page, sees live stats
+- `VITE_CLERK_PUBLISHABLE_KEY` - Clerk publishable key used by the React app.
+- `VITE_API_URL` - Base URL of the backend API.
 
-Respondent Flow (pure REST, no socket)
-Respondent opens /poll/:id
-        │
-        ▼
-Sees the form, fills answers
-        │
-        ▼
-Clicks Submit
-        │
-        ▼
-POST /api/polls/:id/respond    ← just a normal API call
-        │
-        ▼
-Done. Redirected to "Thanks for submitting!"
-The respondent never touches a socket. They just fill a form and hit an API endpoint. That's it.
+### Server Env Example
 
-Creator Flow (socket involved)
-Creator opens /dashboard/poll/:id
-        │
-        ▼
-Page loads → socket.emit("poll:join", { pollId })
-        │         ← tells server "I want live updates for this poll"
-        ▼
-Creator sits and watches the dashboard
-        │
-        ▼
-Meanwhile... a respondent submits via REST
-        │
-        ▼
-Server inserts into DB
-        │
-        ▼
-Server emits to poll room:
-io.to("poll:pollId").emit("poll:stats:updated", { totalResponses: 5 })
-        │
-        ▼
-Creator's dashboard receives it → numbers update live
+Path: `server/.env`
 
-The Connection Between Both
-Respondent                 Your Server              Creator Dashboard
-    │                           │                           │
-    │  POST /api/polls/:id/respond                          │
-    │ ─────────────────────────►│                           │
-    │                           │ insert into DB            │
-    │                           │ calculate new counts      │
-    │                           │ io.to(pollId).emit() ────►│
-    │                           │                           │ updates live
-    │  201 OK                   │                           │
-    │ ◄─────────────────────────│                           │
-The respondent's REST call triggers the socket emit, but the respondent themselves never receives or sends any socket event. The socket message goes only to the creator's open dashboard tab.
-
-One Line Summary
-
-Respondent submits via REST → server emits to socket room → creator's dashboard updates live.
-
-The respondent is the cause, the creator's dashboard is the receiver. They never directly talk to each other.
+```env
+PORT=3000
+CLIENT=http://localhost:5173
+DATABASE_URL=postgres://ADMIN:ADMIN@localhost:5432/llop_ap
+CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_publishable_key
+CLERK_SECRET_KEY=sk_test_your_clerk_secret_key
 ```
 
----
+Server variables:
 
-```JS
-Creator dashboard loads
-        │
-        ▼
-Every 3 seconds:
-GET /api/polls/:id/stats  ← keeps hitting server repeatedly
-GET /api/polls/:id/stats
-GET /api/polls/:id/stats
-        │
-        ▼
-Wasteful — most requests return same data
-Adds unnecessary DB load
-Feels delayed (up to 3s lag)
+- `PORT` - Express and Socket.IO server port.
+- `CLIENT` - Frontend origin allowed by CORS and Socket.IO.
+- `DATABASE_URL` - PostgreSQL connection string used by Drizzle.
+- `CLERK_PUBLISHABLE_KEY` - Clerk public key.
+- `CLERK_SECRET_KEY` - Clerk secret key used by the backend middleware.
+
+## Docker
+
+The project currently includes Docker Compose for the local PostgreSQL database. The app services themselves are run locally with Bun and Vite.
+
+Path: `server/docker-compose.yml`
+
+```yaml
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_USER=ADMIN
+      - POSTGRES_PASSWORD=ADMIN
+      - POSTGRES_DB=llop_ap
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
 ```
 
----
+Start the database:
 
-```JS
-With Socket (what you're building — good)
-Creator dashboard loads
-        │
-        ▼
-socket.emit("poll:join", { pollId })  ← one time, on page load
-        │
-        ▼
-Creator just sits and waits
-        │
-        │   ... respondent submits somewhere in the world ...
-        │
-        ▼
-Server: new row inserted into DB
-        │
-        ▼
-Server: io.to(`poll:${pollId}`).emit("poll:stats:updated", {
-          totalResponses: 6,
-          optionCounts: [...]
-        })
-        │
-        ▼
-Creator's dashboard receives it instantly
-Numbers update on screen — no request made
+```bash
+cd server
+docker compose up -d
 ```
+
+Stop the database:
+
+```bash
+cd server
+docker compose down
+```
+
+Remove the database volume when you intentionally want a fresh database:
+
+```bash
+cd server
+docker compose down -v
+```
+
+## Local Setup
+
+Prerequisites:
+
+- Bun
+- Docker Desktop or another Docker runtime
+- Clerk application keys
+
+Install dependencies:
+
+```bash
+cd server
+bun install
+
+cd ../client
+bun install
+```
+
+Start PostgreSQL:
+
+```bash
+cd server
+docker compose up -d
+```
+
+Run database migrations:
+
+```bash
+cd server
+bun run db:migrate
+```
+
+Start the backend:
+
+```bash
+cd server
+bun run dev
+```
+
+Start the frontend in another terminal:
+
+```bash
+cd client
+bun run dev
+```
+
+Default local URLs:
+
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:3000`
+- Health check: `http://localhost:3000/health`
+
+## Available Scripts
+
+Client scripts:
+
+```bash
+bun run dev
+bun run build
+bun run lint
+bun run preview
+```
+
+Server scripts:
+
+```bash
+bun run dev
+bun run build
+bun run start
+bun run db:generate
+bun run db:migrate
+bun run db:migrate:prod
+bun run db:studio
+```
+
+## Application Routes
+
+Frontend routes:
+
+- `/` - Creator workspace and poll list.
+- `/builder` - Poll builder.
+- `/dashboard/:pollId` - Creator analytics dashboard.
+- `/p/:slug` - Public poll response page.
+
+Backend routes:
+
+- `GET /health` - Server health check.
+- `GET /` - Basic server response.
+- `GET /api/user/me` - Current Clerk-backed app user.
+- `GET /api/poll` - List polls owned by the signed-in user.
+- `POST /api/poll` - Create a poll.
+- `GET /api/poll/:id` - Get one owned poll.
+- `GET /api/poll/:id/analytics` - Get owned poll analytics.
+- `POST /api/poll/:id/publish` - Publish final results.
+- `GET /api/poll/public/:slug` - Get a public poll by slug.
+- `POST /api/poll/public/:slug/submit` - Submit a public poll response.
+
+## Socket Events
+
+Client to server:
+
+- `poll:join` - Dashboard joins `poll:${pollId}`.
+- `poll:leave` - Dashboard leaves `poll:${pollId}`.
+
+Server to client:
+
+- `analytics:update` - Sent after a response is stored and analytics are recalculated.
+- `poll:published` - Sent after the creator publishes results.
+
+Only creator dashboard pages need to join poll rooms. Public respondent pages submit through REST.
+
+## Database Model
+
+Main tables:
+
+- `users` - Local application users mapped to Clerk users.
+- `polls` - Poll metadata, ownership, status, slug, settings, and publish state.
+- `questions` - Poll questions and serialized answer options.
+- `responses` - One submitted response to a poll.
+- `question_responses` - One selected option for one question in one response.
+
+Simplified relationships:
+
+```txt
+users.id              -> polls.created_by
+users.id              -> responses.user_id nullable
+polls.id              -> questions.poll_id
+polls.id              -> responses.poll_id
+responses.id          -> question_responses.response_id
+questions.id          -> question_responses.question_id
+```
+
+Poll statuses:
+
+- `draft` - Planned status for editable unpublished work.
+- `active` - Accepting responses.
+- `expired` - No longer accepting responses.
+- `published` - Final results are visible.
+
+Question types:
+
+- `single_choice`
+- `image_choice`
+
+Current implementation note: newly created polls are inserted as `active`, so they can be shared immediately after creation.
+
+## Data Flow
+
+Response submission flow:
+
+```txt
+Respondent submits form
+        |
+        v
+POST /api/poll/public/:slug/submit
+        |
+        v
+Validate poll state, auth rules, required questions, and option ids
+        |
+        v
+Insert into responses
+        |
+        v
+Insert into question_responses
+        |
+        v
+Rebuild analytics from database rows
+        |
+        v
+Emit analytics:update to poll:${pollId}
+        |
+        v
+Creator dashboard updates live
+```
+
+Creator dashboard flow:
+
+```txt
+Creator opens /dashboard/:pollId
+        |
+        v
+GET /api/poll/:id/analytics
+        |
+        v
+socket.emit("poll:join", pollId)
+        |
+        v
+Wait for analytics:update events
+        |
+        v
+Update Zustand store and render new stats
+```
+
+## API Payload Examples
+
+Create poll:
+
+```json
+{
+  "title": "Product direction",
+  "description": "Help us choose the next roadmap priority.",
+  "category": "product",
+  "tags": ["roadmap", "feedback"],
+  "accentColor": "#B6FF3B",
+  "completionMessage": "Your response has been recorded.",
+  "isAnonymous": true,
+  "showLiveResults": false,
+  "expiresAt": "2026-06-01T12:00:00.000Z",
+  "questions": [
+    {
+      "question": "Which feature should we build first?",
+      "isMandatory": true,
+      "options": ["Analytics export", "Team permissions", "Custom themes"]
+    }
+  ]
+}
+```
+
+Submit response:
+
+```json
+{
+  "submissionToken": "client-generated-token",
+  "respondentName": "Aalam",
+  "respondentEmail": "aalam@example.com",
+  "answers": [
+    {
+      "questionId": "question-uuid",
+      "selectedOptionId": "option-id"
+    }
+  ]
+}
+```
+
+## Build
+
+Build frontend:
+
+```bash
+cd client
+bun run build
+```
+
+Build backend TypeScript:
+
+```bash
+cd server
+bun run build
+```
+
+## Production Notes
+
+Before production deployment:
+
+- Set real Clerk production keys.
+- Set `CLIENT` to the deployed frontend origin.
+- Set `VITE_API_URL` to the deployed backend URL.
+- Use a managed PostgreSQL database or a production-safe Postgres container.
+- Run Drizzle migrations against the production database.
+- Restrict CORS to the real frontend domain.
+- Serve the Vite build through a static host or CDN.
+- Run the backend with process supervision.
+- Add Dockerfiles for the client and server if the deployment target expects fully containerized app services.
+
+## Future Improvements
+
+- Add edit support for draft polls.
+- Add explicit expire job or status transition for expired polls.
+- Add image upload/storage for `image_choice` options.
+- Add pagination and search for large poll lists.
+- Add more analytics dimensions.
+- Add automated tests for poll creation, response submission, auth behavior, and analytics.
+- Add production Dockerfiles for the client and server.
