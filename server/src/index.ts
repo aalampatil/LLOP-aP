@@ -9,6 +9,7 @@ import { registerSocketHandlers } from "./socket";
 import { env } from "./env";
 import { initIO } from "./lib/socket";
 import { errorHandler } from "./lib/http";
+import { startPollExpiryJob } from "./jobs/expire-polls";
 
 const app = express();
 const server = createServer(app);
@@ -44,10 +45,19 @@ async function main() {
   app.use("/api/user", userRouter);
   app.use("/api/poll", pollRouter);
   app.use(errorHandler);
+  const stopPollExpiryJob = startPollExpiryJob();
 
   server.listen(port, () => {
     console.log(`server is listening on http://localhost:${port}`);
   });
+
+  const shutdown = () => {
+    stopPollExpiryJob();
+    server.close(() => process.exit(0));
+  };
+
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 }
 
 main();

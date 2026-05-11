@@ -350,6 +350,15 @@ Question types:
 
 Current implementation note: newly created polls are inserted as `active`, so they can be shared immediately after creation. Duplicated polls are inserted as `draft` so they can be adjusted before reuse.
 
+Expiry handling:
+
+- The backend starts a poll expiry job when the server boots.
+- The job runs once on startup and then every 60 seconds.
+- Active polls with `expires_at <= now()` are updated to `expired`.
+- Expired polls are no longer accepted by the response submission endpoint.
+- When a poll expires, the server emits `poll:expired` to the poll Socket.IO room.
+- Open dashboard/public poll pages update their local poll state when they receive the expiry event.
+
 ## Data Flow
 
 Response submission flow:

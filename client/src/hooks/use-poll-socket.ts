@@ -5,7 +5,10 @@ import type { Analytics } from "../types/poll";
 
 type SocketLike = {
   emit: (event: string, payload?: unknown) => void;
-  on: (event: string, callback: (payload: { analytics?: Analytics }) => void) => void;
+  on: (
+    event: string,
+    callback: (payload: { analytics?: Analytics; pollId?: string }) => void,
+  ) => void;
   disconnect: () => void;
 };
 
@@ -17,6 +20,7 @@ declare global {
 
 export function usePollSocket(pollId?: string | null) {
   const setAnalytics = usePollStore((state) => state.setAnalytics);
+  const setPollExpired = usePollStore((state) => state.setPollExpired);
 
   useEffect(() => {
     if (!pollId) return;
@@ -33,6 +37,9 @@ export function usePollSocket(pollId?: string | null) {
       });
       socket.on("poll:published", (payload) => {
         if (payload.analytics) setAnalytics(payload.analytics);
+      });
+      socket.on("poll:expired", (payload) => {
+        if (payload.pollId) setPollExpired(payload.pollId);
       });
     };
 
@@ -51,5 +58,5 @@ export function usePollSocket(pollId?: string | null) {
       socket?.emit("poll:leave", pollId);
       socket?.disconnect();
     };
-  }, [pollId, setAnalytics]);
+  }, [pollId, setAnalytics, setPollExpired]);
 }
