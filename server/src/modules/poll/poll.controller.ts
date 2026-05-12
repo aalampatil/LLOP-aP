@@ -1,7 +1,6 @@
 import type { Request, Response } from "express";
 import { getAuth } from "@clerk/express";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import { z } from "zod";
 import { db } from "../../db";
 import {
   pollsTable,
@@ -12,6 +11,11 @@ import {
 import { getIO } from "../../lib/socket";
 import { HttpError, getSessionUser, requireSessionUser } from "../../lib/http";
 import {
+  assertAnonymousRateLimit,
+  csvCell,
+  stringParam,
+} from "./poll.request-utils";
+import {
   buildAnalytics,
   isAcceptingResponses,
   loadPollBySlug,
@@ -21,86 +25,7 @@ import {
   parseJson,
   serializePoll,
 } from "./poll.service";
-
-function stringParam(value: string | string[] | undefined, name: string) {
-  if (Array.isArray(value)) return value[0] ?? "";
-  if (value) return value;
-  throw new HttpError(400, `${name} is required`);
-}
-
-function csvCell(value: unknown) {
-  const text =
-    value instanceof Date
-      ? value.toISOString()
-      : value === null || value === undefined
-        ? ""
-        : String(value);
-  return `"${text.replaceAll('"', '""')}"`;
-}
-
-const anonymousSubmitAttempts = new Map<string, number[]>();
-
-function getClientIp(req: Request) {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (typeof forwarded === "string") return forwarded.split(",")[0]?.trim() || req.ip;
-  return req.ip;
-}
-
-function assertAnonymousRateLimit(req: Request, pollId: string) {
-  const key = `${pollId}:${getClientIp(req)}`;
-  const now = Date.now();
-  const windowMs = 60_000;
-  const maxAttempts = 5;
-  const attempts = (anonymousSubmitAttempts.get(key) ?? []).filter(
-    (timestamp) => now - timestamp < windowMs,
-  );
-
-  if (attempts.length >= maxAttempts) {
-    throw new HttpError(429, "Too many submissions. Please try again in a minute.");
-  }
-
-  attempts.push(now);
-  anonymousSubmitAttempts.set(key, attempts);
-}
-
-const questionInput = z.object({
-  question: z.string().trim().min(4).max(500),
-  isMandatory: z.boolean().default(true),
-  options: z.array(z.union([
-    z.string().trim().min(1),
-    z.object({
-      id: z.string().optional(),
-      label: z.string().trim().min(1),
-      imageUrl: z.string().url().nullable().optional(),
-    }),
-  ])).min(2).max(8),
-});
-
-const createPollInput = z.object({
-  title: z.string().trim().min(4).max(255),
-  customSlug: z.string().trim().min(3).max(120).optional().nullable(),
-  description: z.string().trim().max(2000).optional().nullable(),
-  category: z.string().trim().min(1).max(120).default("general"),
-  tags: z.array(z.string().trim().min(1).max(40)).max(8).default([]),
-  accentColor: z.string().trim().min(3).max(40).default("#B6FF3B"),
-  completionMessage: z.string().trim().min(4).max(500).default("Your response has been recorded. Thanks for weighing in."),
-  isAnonymous: z.boolean().default(true),
-  showLiveResults: z.boolean().default(false),
-  expiresAt: z.string().datetime().optional().nullable(),
-  questions: z.array(questionInput).min(1).max(20),
-});
-
-const submitPollInput = z.object({
-  answers: z.array(
-    z.object({
-      questionId: z.string().uuid(),
-      selectedOptionId: z.string().min(1),
-    }),
-  ),
-  submissionToken: z.string().trim().min(12).max(255).optional(),
-  respondentName: z.string().trim().max(255).optional(),
-  respondentEmail: z.string().email().max(255).optional(),
-});
+import { createPollInput, submitPollInput } from "./poll.validation";
 
 export async function listPolls(req: Request, res: Response) {
   const user = await requireSessionUser(req);

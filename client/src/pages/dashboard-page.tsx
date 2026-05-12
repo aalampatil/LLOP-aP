@@ -1,34 +1,16 @@
-import { Check, Clock, Download, Eye, Link2, Loader2, Lock, QrCode, RefreshCw, Send, ShieldCheck, UserCheck, Users, XCircle } from "lucide-react";
+import { Check, Download, Eye, Loader2, RefreshCw, Send, ShieldCheck, UserCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { DashboardMetric } from "../components/dashboard/dashboard-metric";
+import { DashboardSidebar } from "../components/dashboard/dashboard-sidebar";
+import { IndividualResponses } from "../components/dashboard/individual-responses";
 import { QuestionAnalytics } from "../components/polls/question-analytics";
 import { CopyPublicLinkButton } from "../components/ui/copy-public-link-button";
 import { usePollSocket } from "../hooks/use-poll-socket";
 import { getApiError, useApiClient } from "../lib/api";
-import { formatDate, publicPollUrl } from "../lib/poll-utils";
+import { publicPollUrl } from "../lib/poll-utils";
 import { usePollStore } from "../store/poll-store";
 import type { Analytics, Poll, ResponseDetail } from "../types/poll";
-
-/* ─────────────────────────────────────────────
-   Themed sub-components
-───────────────────────────────────────────── */
-function DbMetric({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="db-metric">
-      <div className="db-metric-label">{icon}{label}</div>
-      <div className="db-metric-value">{value}</div>
-    </div>
-  );
-}
-
-function DbPreviewRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="db-preview-row">
-      <span className="db-preview-label">{icon}{label}</span>
-      <span className="db-preview-value">{value}</span>
-    </div>
-  );
-}
 
 /* ─────────────────────────────────────────────
    DashboardPage
@@ -248,10 +230,10 @@ export function DashboardPage() {
 
         {/* ── Metrics ── */}
         <div className="db-metrics">
-          <DbMetric icon={<Send size={12} />} label="Responses" value={analytics.totalResponses.toString()} />
-          <DbMetric icon={<Check size={12} />} label="Completion" value={`${analytics.completionRate}%`} />
-          <DbMetric icon={<ShieldCheck size={12} />} label="Anonymous" value={analytics.anonymousResponses.toString()} />
-          <DbMetric icon={<UserCheck size={12} />} label="Signed in" value={analytics.authenticatedResponses.toString()} />
+          <DashboardMetric icon={<Send size={12} />} label="Responses" value={analytics.totalResponses.toString()} />
+          <DashboardMetric icon={<Check size={12} />} label="Completion" value={`${analytics.completionRate}%`} />
+          <DashboardMetric icon={<ShieldCheck size={12} />} label="Anonymous" value={analytics.anonymousResponses.toString()} />
+          <DashboardMetric icon={<UserCheck size={12} />} label="Signed in" value={analytics.authenticatedResponses.toString()} />
         </div>
 
         {/* ── Main grid ── */}
@@ -262,72 +244,11 @@ export function DashboardPage() {
             {analytics.questions.map((question) => (
               <QuestionAnalytics key={question.id} question={question} />
             ))}
-            <section className="neo-panel p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-3xl font-black">Individual responses</h2>
-                <span className="premium-badge">{responses.length} entries</span>
-              </div>
-              <div className="space-y-3">
-                {responses.length === 0 ? (
-                  <p className="text-sm font-bold text-muted-foreground">No responses yet.</p>
-                ) : (
-                  responses.map((response) => (
-                    <article className="border border-border bg-background p-4" key={response.id}>
-                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.08em] text-muted-foreground">
-                          <Users size={13} />
-                          {response.respondentName || response.respondentEmail || (response.isAnonymous ? "Anonymous respondent" : "Signed-in respondent")}
-                        </div>
-                        <time className="text-xs text-muted-foreground">
-                          {formatDate(response.submittedAt)}
-                        </time>
-                      </div>
-                      <div className="grid gap-2">
-                        {response.answers.map((answer) => (
-                          <div className="border-t border-border pt-2" key={`${response.id}-${answer.questionId}`}>
-                            <p className="text-xs font-black uppercase tracking-[0.08em] text-muted-foreground">
-                              {answer.question}
-                            </p>
-                            <p className="font-black">{answer.selectedOptionLabel}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </article>
-                  ))
-                )}
-              </div>
-            </section>
+            <IndividualResponses responses={responses} />
           </section>
 
           {/* Sidebar */}
-          <aside className="db-sidebar">
-            <h2 className="db-sidebar-title">Share room</h2>
-            <div className="db-url-box">{shareUrl}</div>
-            <CopyPublicLinkButton url={shareUrl} className="db-btn db-btn-secondary" style={{ width: "100%", justifyContent: "center" }} />
-            <div className="mt-4 rounded-md border border-border bg-white p-3">
-              <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase text-black">
-                <QrCode size={14} /> QR share
-              </div>
-              <img
-                alt="Poll share QR code"
-                className="mx-auto h-40 w-40"
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(shareUrl)}`}
-              />
-              <button
-                className="db-btn db-btn-secondary mt-3 w-full"
-                onClick={downloadQr}
-                type="button"
-              >
-                <Download size={14} /> Download QR
-              </button>
-            </div>
-            <hr className="db-divider" />
-            <DbPreviewRow icon={<Clock size={12} />} label="Expires" value={formatDate(activePoll.expiresAt)} />
-            <DbPreviewRow icon={<Lock size={12} />} label="Mode" value={activePoll.isAnonymous ? "Anonymous" : "Authenticated"} />
-            <DbPreviewRow icon={<Eye size={12} />} label="Public results" value={activePoll.status === "published" ? "Published" : "Hidden"} />
-            <DbPreviewRow icon={<Link2 size={12} />} label="Slug" value={activePoll.slug} />
-            <DbPreviewRow icon={<ShieldCheck size={12} />} label="Status" value={activePoll.status} />
-          </aside>
+          <DashboardSidebar poll={activePoll} shareUrl={shareUrl} downloadQr={downloadQr} />
         </div>
 
       </div>
