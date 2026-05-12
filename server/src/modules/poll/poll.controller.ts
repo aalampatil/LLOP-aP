@@ -8,6 +8,7 @@ import {
   questionsTable,
   responsesTable,
 } from "../../db/schema";
+import { invalidateAdminOverviewCache } from "../admin/admin.cache";
 import { getIO } from "../../lib/socket";
 import { HttpError, getSessionUser, requireSessionUser } from "../../lib/http";
 import {
@@ -15,6 +16,17 @@ import {
   csvCell,
   stringParam,
 } from "./poll.request-utils";
+import {
+  getCachedPollAnalytics,
+  getCachedPollDetail,
+  getCachedPollList,
+  getCachedPublicPoll,
+  invalidatePollCache,
+  setCachedPollAnalytics,
+  setCachedPollDetail,
+  setCachedPollList,
+  setCachedPublicPoll,
+} from "./poll.cache";
 import {
   buildAnalytics,
   isAcceptingResponses,
@@ -29,6 +41,9 @@ import { createPollInput, submitPollInput } from "./poll.validation";
 
 export async function listPolls(req: Request, res: Response) {
   const user = await requireSessionUser(req);
+  const cachedPolls = await getCachedPollList(user.id);
+  if (cachedPolls) return res.json(cachedPolls);
+
   const polls = await db
     .select()
     .from(pollsTable)
@@ -44,7 +59,9 @@ export async function listPolls(req: Request, res: Response) {
     })),
   );
 
-  return res.json({ polls: withAnalytics });
+  const responseBody = { polls: withAnalytics };
+  await setCachedPollList(user.id, responseBody);
+  return res.json(responseBody);
 }
 
 export async function createPoll(req: Request, res: Response) {
@@ -102,6 +119,8 @@ export async function createPoll(req: Request, res: Response) {
 
   const loaded = await loadPollForOwner(poll.id, user.id);
   if (!loaded) throw new HttpError(500, "Poll could not be loaded");
+  await invalidatePollCache({ ownerId: user.id });
+  await invalidateAdminOverviewCache();
 
   return res.status(201).json({ poll: serializePoll(loaded.poll, loaded.questions) });
 }
@@ -109,14 +128,18 @@ export async function createPoll(req: Request, res: Response) {
 export async function getOwnedPoll(req: Request, res: Response) {
   const user = await requireSessionUser(req);
   const pollId = stringParam(req.params.id, "Poll id");
+  const cachedPoll = await getCachedPollDetail(user.id, pollId);
+  if (cachedPoll) return res.json(cachedPoll);
 
   const loaded = await loadPollForOwner(pollId, user.id);
   if (!loaded) throw new HttpError(404, "Poll not found");
 
-  return res.json({
+  const responseBody = {
     poll: serializePoll(loaded.poll, loaded.questions),
     analytics: await buildAnalytics(loaded.poll.id),
-  });
+  };
+  await setCachedPollDetail(user.id, pollId, responseBody);
+  return res.json(responseBody);
 }
 
 export async function publishPoll(req: Request, res: Response) {
@@ -139,6 +162,12 @@ export async function publishPoll(req: Request, res: Response) {
   if (!updated) throw new HttpError(404, "Poll not found");
 
   const analytics = await buildAnalytics(updated.id);
+  await invalidatePollCache({
+    ownerId: user.id,
+    pollId: updated.id,
+    slug: updated.slug,
+  });
+  await invalidateAdminOverviewCache();
   getIO().to(`poll:${updated.id}`).emit("poll:published", {
     pollId: updated.id,
     analytics,
@@ -169,6 +198,12 @@ export async function closePoll(req: Request, res: Response) {
   if (!updated) throw new HttpError(404, "Poll not found");
 
   const analytics = await buildAnalytics(updated.id);
+  await invalidatePollCache({
+    ownerId: user.id,
+    pollId: updated.id,
+    slug: updated.slug,
+  });
+  await invalidateAdminOverviewCache();
   getIO().to(`poll:${updated.id}`).emit("poll:closed", {
     pollId: updated.id,
     analytics,
@@ -202,6 +237,12 @@ export async function reopenPoll(req: Request, res: Response) {
   if (!updated) throw new HttpError(404, "Poll not found");
 
   const analytics = await buildAnalytics(updated.id);
+  await invalidatePollCache({
+    ownerId: user.id,
+    pollId: updated.id,
+    slug: updated.slug,
+  });
+  await invalidateAdminOverviewCache();
   getIO().to(`poll:${updated.id}`).emit("poll:reopened", {
     pollId: updated.id,
     analytics,
@@ -256,6 +297,8 @@ export async function duplicatePoll(req: Request, res: Response) {
 
   const duplicatedLoaded = await loadPollForOwner(duplicated.id, user.id);
   if (!duplicatedLoaded) throw new HttpError(500, "Duplicated poll could not be loaded");
+  await invalidatePollCache({ ownerId: user.id });
+  await invalidateAdminOverviewCache();
 
   return res.status(201).json({
     poll: serializePoll(duplicatedLoaded.poll, duplicatedLoaded.questions),
@@ -415,6 +458,8 @@ export async function listResponses(req: Request, res: Response) {
 
 export async function getPublicPoll(req: Request, res: Response) {
   const slug = stringParam(req.params.slug, "Poll slug");
+  const cachedPoll = await getCachedPublicPoll(slug);
+  if (cachedPoll) return res.json(cachedPoll);
 
   const loaded = await loadPollBySlug(slug);
   if (!loaded) throw new HttpError(404, "Poll not found");
@@ -427,7 +472,7 @@ export async function getPublicPoll(req: Request, res: Response) {
       ? await buildAnalytics(loaded.poll.id)
       : null;
 
-  return res.json({
+  const responseBody = {
     poll: serializePoll(loaded.poll, loaded.questions),
     state: {
       expired,
@@ -436,7 +481,9 @@ export async function getPublicPoll(req: Request, res: Response) {
       authRequired: !loaded.poll.isAnonymous,
     },
     analytics,
-  });
+  };
+  await setCachedPublicPoll(slug, responseBody);
+  return res.json(responseBody);
 }
 
 export async function submitPoll(req: Request, res: Response) {
@@ -557,6 +604,12 @@ export async function submitPoll(req: Request, res: Response) {
     });
 
   const analytics = await buildAnalytics(loaded.poll.id);
+  await invalidatePollCache({
+    ownerId: loaded.poll.createdBy,
+    pollId: loaded.poll.id,
+    slug: loaded.poll.slug,
+  });
+  await invalidateAdminOverviewCache();
   getIO().to(`poll:${loaded.poll.id}`).emit("analytics:update", {
     pollId: loaded.poll.id,
     analytics,
@@ -572,14 +625,18 @@ export async function submitPoll(req: Request, res: Response) {
 export async function getAnalytics(req: Request, res: Response) {
   const user = await requireSessionUser(req);
   const pollId = stringParam(req.params.id, "Poll id");
+  const cachedAnalytics = await getCachedPollAnalytics(user.id, pollId);
+  if (cachedAnalytics) return res.json(cachedAnalytics);
 
   const loaded = await loadPollForOwner(pollId, user.id);
   if (!loaded) throw new HttpError(404, "Poll not found");
 
-  return res.json({
+  const responseBody = {
     poll: serializePoll(loaded.poll, loaded.questions),
     analytics: await buildAnalytics(loaded.poll.id),
-  });
+  };
+  await setCachedPollAnalytics(user.id, pollId, responseBody);
+  return res.json(responseBody);
 }
 
 export async function currentUser(req: Request, res: Response) {

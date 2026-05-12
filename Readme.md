@@ -149,6 +149,7 @@ DATABASE_URL=postgres://ADMIN:ADMIN@localhost:5432/llop_ap
 CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_publishable_key
 CLERK_SECRET_KEY=sk_test_your_clerk_secret_key
 ADMIN_EMAILS=admin1@example.com,admin2@example.com
+VALKEY_URL=redis://localhost:6379
 ```
 
 Server variables:
@@ -159,6 +160,7 @@ Server variables:
 - `CLERK_PUBLISHABLE_KEY` - Clerk public key.
 - `CLERK_SECRET_KEY` - Clerk secret key used by the backend middleware.
 - `ADMIN_EMAILS` - Comma-separated allowlist of emails that should be treated as platform admins.
+- `VALKEY_URL` - Redis-compatible Valkey connection URL used for cache and Socket.IO pub/sub.
 
 ## Docker
 
@@ -190,6 +192,8 @@ Start the database:
 cd server
 docker compose up -d
 ```
+
+This also starts Valkey locally on port `6379` for Redis-compatible caching and Socket.IO pub/sub.
 
 Stop the database:
 

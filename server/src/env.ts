@@ -7,6 +7,7 @@ const envSchema = z.object({
   CLERK_PUBLISHABLE_KEY: z.string(),
   CLERK_SECRET_KEY: z.string(),
   ADMIN_EMAILS: z.string().optional().default(""),
+  VALKEY_URL: z.string().optional().default("redis://localhost:6379"),
 });
 
 function createEnv(env: NodeJS.ProcessEnv) {

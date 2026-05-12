@@ -9,6 +9,7 @@ import { adminRouter } from "./modules/admin/admin.routes";
 import { registerSocketHandlers } from "./socket";
 import { env } from "./env";
 import { initIO } from "./lib/socket";
+import { closeSocketPubSub, setupSocketPubSub } from "./lib/socket-adapter";
 import { errorHandler } from "./lib/http";
 import { startPollExpiryJob } from "./jobs/expire-polls";
 
@@ -24,6 +25,7 @@ initIO(io);
 
 async function main() {
   const port = Number(env.PORT || 3000);
+  await setupSocketPubSub(io);
   registerSocketHandlers(io);
 
   app.use(
@@ -53,8 +55,9 @@ async function main() {
     console.log(`server is listening on http://localhost:${port}`);
   });
 
-  const shutdown = () => {
+  const shutdown = async () => {
     stopPollExpiryJob();
+    await closeSocketPubSub();
     server.close(() => process.exit(0));
   };
 

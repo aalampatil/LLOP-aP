@@ -5,6 +5,11 @@ import { pollsTable, responsesTable, usersTable } from "../../db/schema";
 import { HttpError, requireAdminUser } from "../../lib/http";
 import { getIO } from "../../lib/socket";
 import { buildAnalytics, parseJson } from "../poll/poll.service";
+import {
+  getCachedAdminOverview,
+  invalidateAdminOverviewCache,
+  setCachedAdminOverview,
+} from "./admin.cache";
 
 function stringParam(value: string | string[] | undefined, name: string) {
   if (Array.isArray(value)) return value[0] ?? "";
@@ -14,6 +19,9 @@ function stringParam(value: string | string[] | undefined, name: string) {
 
 export async function getAdminOverview(req: Request, res: Response) {
   await requireAdminUser(req);
+
+  const cachedOverview = await getCachedAdminOverview();
+  if (cachedOverview) return res.json(cachedOverview);
 
   const [
     users,
@@ -63,7 +71,7 @@ export async function getAdminOverview(req: Request, res: Response) {
   const activePolls = polls.filter((poll) => poll.status === "active").length;
   const publishedPolls = polls.filter((poll) => poll.status === "published").length;
 
-  return res.json({
+  const overview = {
     stats: {
       totalUsers: users.length,
       totalPolls: polls.length,
@@ -106,7 +114,11 @@ export async function getAdminOverview(req: Request, res: Response) {
           : null,
       };
     }),
-  });
+  };
+
+  await setCachedAdminOverview(overview);
+
+  return res.json(overview);
 }
 
 export async function closePollAsAdmin(req: Request, res: Response) {
@@ -124,6 +136,7 @@ export async function closePollAsAdmin(req: Request, res: Response) {
   }
 
   const analytics = await buildAnalytics(updated.id);
+  await invalidateAdminOverviewCache();
   getIO().to(`poll:${updated.id}`).emit("poll:closed", {
     pollId: updated.id,
     analytics,

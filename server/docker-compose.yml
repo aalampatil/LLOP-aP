@@ -10,6 +10,11 @@ services:
     - POSTGRES_DB=llop_ap
     volumes:
       - pgdata:/var/lib/postgresql/data
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    ports:
+      - 6379:6379
 
 volumes:
   pgdata:

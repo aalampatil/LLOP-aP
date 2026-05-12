@@ -2,6 +2,8 @@ import { and, eq, lte } from "drizzle-orm";
 import { db } from "../db";
 import { pollsTable } from "../db/schema";
 import { getIO } from "../lib/socket";
+import { invalidateAdminOverviewCache } from "../modules/admin/admin.cache";
+import { invalidatePollCache } from "../modules/poll/poll.cache";
 
 const EXPIRE_POLL_INTERVAL_MS = 60_000;
 
@@ -21,6 +23,7 @@ export async function expireDuePolls() {
     )
     .returning({
       id: pollsTable.id,
+      createdBy: pollsTable.createdBy,
       slug: pollsTable.slug,
       title: pollsTable.title,
     });
@@ -28,6 +31,11 @@ export async function expireDuePolls() {
   if (expiredPolls.length > 0) {
     const io = getIO();
     for (const poll of expiredPolls) {
+      await invalidatePollCache({
+        ownerId: poll.createdBy,
+        pollId: poll.id,
+        slug: poll.slug,
+      });
       io.to(`poll:${poll.id}`).emit("poll:expired", {
         pollId: poll.id,
         slug: poll.slug,
@@ -35,6 +43,7 @@ export async function expireDuePolls() {
         expiredAt,
       });
     }
+    await invalidateAdminOverviewCache();
     console.log(`expired ${expiredPolls.length} poll(s)`);
   }
 
