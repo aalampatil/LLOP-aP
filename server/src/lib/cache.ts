@@ -8,14 +8,18 @@ const redis = new Redis(env.VALKEY_URL, {
 });
 
 let connecting: Promise<void> | null = null;
+let cacheDisabled = false;
 
 redis.on("error", (error) => {
   console.warn(`Valkey cache unavailable: ${error.message}`);
 });
 
 async function ensureCacheConnection() {
-  if (redis.status === "ready") return true;
-  if (redis.status === "connecting" || redis.status === "connect") {
+  if (cacheDisabled) return false;
+
+  const status = redis.status as string;
+  if (status === "ready") return true;
+  if (status === "connecting" || status === "connect") {
     await connecting?.catch(() => undefined);
     return redis.status === "ready";
   }
@@ -25,7 +29,7 @@ async function ensureCacheConnection() {
     await connecting;
     return true;
   } catch {
-    disabled = true;
+    cacheDisabled = true;
     return false;
   } finally {
     connecting = null;

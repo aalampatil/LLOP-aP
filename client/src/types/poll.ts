@@ -117,6 +117,7 @@ export type AdminOverview = {
     email: string;
     role: string;
     createdAt: string;
+    updatedAt?: string;
     pollCount: number;
     responseCount: number;
   }[];

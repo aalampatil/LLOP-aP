@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { pollsTable, responsesTable, usersTable } from "../../db/schema";
-import { HttpError, requireAdminUser } from "../../lib/http";
+import { HttpError, isAdminEmail, requireAdminUser } from "../../lib/http";
 import { getIO } from "../../lib/socket";
 import { buildAnalytics, parseJson } from "../poll/poll.service";
 import {
@@ -143,4 +143,49 @@ export async function closePollAsAdmin(req: Request, res: Response) {
   });
 
   return res.json({ poll: updated, analytics });
+}
+
+export async function updateUserRoleAsAdmin(req: Request, res: Response) {
+  const admin = await requireAdminUser(req);
+  const userId = stringParam(req.params.id, "User id");
+  const role = typeof req.body?.role === "string" ? req.body.role : "";
+
+  if (!["admin", "creator"].includes(role)) {
+    throw new HttpError(400, "Role must be admin or creator");
+  }
+  if (userId === admin.id && role !== "admin") {
+    throw new HttpError(409, "You cannot remove your own admin access");
+  }
+
+  const [targetUser] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.id, userId))
+    .limit(1);
+
+  if (!targetUser) throw new HttpError(404, "User not found");
+  if (role !== "admin" && isAdminEmail(targetUser.email)) {
+    throw new HttpError(409, "This user is protected by the admin email allowlist");
+  }
+
+  const [updated] = await db
+    .update(usersTable)
+    .set({ role, updatedAt: new Date() })
+    .where(eq(usersTable.id, userId))
+    .returning();
+
+  if (!updated) throw new HttpError(404, "User not found");
+
+  await invalidateAdminOverviewCache();
+
+  return res.json({
+    user: {
+      id: updated.id,
+      name: updated.name,
+      email: updated.email,
+      role: updated.role,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+    },
+  });
 }

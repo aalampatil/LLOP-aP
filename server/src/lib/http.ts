@@ -30,7 +30,7 @@ function getAdminEmails() {
   );
 }
 
-function isAdminEmail(email: string) {
+export function isAdminEmail(email: string) {
   return getAdminEmails().has(email.toLowerCase());
 }
 

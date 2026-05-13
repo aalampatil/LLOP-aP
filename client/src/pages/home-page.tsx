@@ -1,5 +1,19 @@
 import { SignUpButton } from "@clerk/react";
-import { Activity, Eye, Loader2, Plus, Rocket, Send, ShieldCheck, Sparkles, Vote, Zap } from "lucide-react";
+import {
+  Activity,
+  ArrowDownAZ,
+  Eye,
+  Loader2,
+  Plus,
+  Rocket,
+  Search,
+  Send,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  Vote,
+  Zap,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { SignedInView, SignedOutView } from "../components/auth/auth-views";
@@ -34,6 +48,8 @@ export function HomePage() {
   const { polls, setPolls, loading, setLoading } = usePollStore();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [modeFilter, setModeFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("newest");
 
   useEffect(() => {
     let active = true;
@@ -60,9 +76,11 @@ export function HomePage() {
   }, []);
 
   const totalResponses = polls.reduce((sum, poll) => sum + poll.analytics.totalResponses, 0);
+  const activePolls = polls.filter((poll) => poll.status === "active").length;
+  const publishedPolls = polls.filter((poll) => poll.status === "published").length;
   const visiblePolls = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return polls.filter((poll) => {
+    const filtered = polls.filter((poll) => {
       const matchesSearch =
         !query ||
         poll.title.toLowerCase().includes(query) ||
@@ -70,9 +88,39 @@ export function HomePage() {
         poll.category.toLowerCase().includes(query) ||
         poll.tags.some((tag) => tag.toLowerCase().includes(query));
       const matchesStatus = statusFilter === "all" || poll.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesMode =
+        modeFilter === "all" ||
+        (modeFilter === "anonymous" && poll.isAnonymous) ||
+        (modeFilter === "authenticated" && !poll.isAnonymous);
+      return matchesSearch && matchesStatus && matchesMode;
     });
-  }, [polls, search, statusFilter]);
+
+    return [...filtered].sort((a, b) => {
+      if (sortBy === "oldest") {
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      }
+      if (sortBy === "responses") {
+        return b.analytics.totalResponses - a.analytics.totalResponses;
+      }
+      if (sortBy === "title") {
+        return a.title.localeCompare(b.title);
+      }
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [modeFilter, polls, search, sortBy, statusFilter]);
+
+  const hasWorkspaceFilters =
+    search.trim() !== "" ||
+    statusFilter !== "all" ||
+    modeFilter !== "all" ||
+    sortBy !== "newest";
+
+  const resetWorkspaceFilters = () => {
+    setSearch("");
+    setStatusFilter("all");
+    setModeFilter("all");
+    setSortBy("newest");
+  };
 
   const scrollToWorkspace = () =>
     document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth" });
@@ -152,7 +200,7 @@ export function HomePage() {
             <div className="hp-metrics">
               <ThemeMetric icon={<Vote size={12} />} label="Polls" value={polls.length.toString()} />
               <ThemeMetric icon={<Send size={12} />} label="Responses" value={totalResponses.toString()} />
-              <ThemeMetric icon={<Sparkles size={12} />} label="Mode" value="Live" />
+              <ThemeMetric icon={<Sparkles size={12} />} label="Active" value={activePolls.toString()} />
             </div>
 
             <div className="hp-analytics">
@@ -202,26 +250,77 @@ export function HomePage() {
           </div>
 
           <SignedInView>
-            <div className="mt-6 grid gap-3 md:grid-cols-[1fr_220px]">
-              <input
-                className="neo-input"
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search polls by title, description, category, or tag"
-                type="search"
-                value={search}
-              />
-              <select
-                className="neo-input"
-                onChange={(event) => setStatusFilter(event.target.value)}
-                value={statusFilter}
-              >
-                <option value="all">All statuses</option>
-                <option value="draft">Draft</option>
-                <option value="active">Active</option>
-                <option value="closed">Closed</option>
-                <option value="expired">Expired</option>
-                <option value="published">Published</option>
-              </select>
+            <div className="neo-panel p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-muted-foreground">
+                  <SlidersHorizontal size={14} />
+                  Workspace controls
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+                  <span className="premium-badge">{visiblePolls.length} shown</span>
+                  <span>{activePolls} active</span>
+                  <span>{publishedPolls} published</span>
+                  {hasWorkspaceFilters ? (
+                    <button
+                      className="text-main"
+                      onClick={resetWorkspaceFilters}
+                      type="button"
+                    >
+                      Reset
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <div className="grid gap-3 lg:grid-cols-[1fr_180px_210px_190px]">
+                <label className="relative block">
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <input
+                    className="neo-input pl-10"
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search title, description, category, or tag"
+                    type="search"
+                    value={search}
+                  />
+                </label>
+                <select
+                  className="neo-input"
+                  onChange={(event) => setStatusFilter(event.target.value)}
+                  value={statusFilter}
+                >
+                  <option value="all">All statuses</option>
+                  <option value="draft">Draft</option>
+                  <option value="active">Active</option>
+                  <option value="closed">Closed</option>
+                  <option value="expired">Expired</option>
+                  <option value="published">Published</option>
+                </select>
+                <select
+                  className="neo-input"
+                  onChange={(event) => setModeFilter(event.target.value)}
+                  value={modeFilter}
+                >
+                  <option value="all">All response modes</option>
+                  <option value="anonymous">Anonymous only</option>
+                  <option value="authenticated">Authenticated only</option>
+                </select>
+                <label className="relative block">
+                  <ArrowDownAZ
+                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <select
+                    className="neo-input pl-10"
+                    onChange={(event) => setSortBy(event.target.value)}
+                    value={sortBy}
+                  >
+                    <option value="newest">Newest first</option>
+                    <option value="oldest">Oldest first</option>
+                    <option value="responses">Most responses</option>
+                    <option value="title">Title A-Z</option>
+                  </select>
+                </label>
+              </div>
             </div>
           </SignedInView>
 
